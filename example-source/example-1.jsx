@@ -1,10 +1,9 @@
-import { Didact } from "./src/index.js";
-
 const element = (
   <div>
     <span>some text</span>
     <span>some more text</span>
+    <div>one line of jsx</div>
   </div>
 );
 
-Didact.render(anotherElement, document.getElementById("root"));
+DidactDOM.render(element, document.getElementById("root"));
