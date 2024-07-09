@@ -1,3 +1,6 @@
+import { checkNonUndefined } from "./utils/nullable/non-nullable";
+import { assert } from "./utils/typescript/assert";
+
 type PropsT = Record<string, unknown> & {
   children: (ElementT | TextElementT)[];
 };
@@ -65,32 +68,56 @@ const createDom = (fiber: ElementT | TextElementT) => {
     .forEach((prop) => {
       // TODO: add type guard for all possible html elements attributes
       // @ts-ignore
-      dom[prop] = element.props[prop];
+      dom[prop] = fiber.props[prop];
     });
 
   return dom;
 };
 
+const commitWork = (fiber: undefined | FiberT) => {
+  if (!fiber) {
+    return;
+  }
+
+  assert(fiber.parent, checkNonUndefined);
+
+  assert(fiber.parent.dom, checkNonUndefined);
+
+  assert(fiber.dom, checkNonUndefined);
+
+  fiber.parent.dom.appendChild(fiber.dom);
+
+  commitWork(fiber.child);
+
+  commitWork(fiber.sibling);
+};
+
+const commitRoot = () => {
+  commitWork(workInProgressRoot?.child);
+
+  workInProgressRoot = undefined;
+};
+
 const render = (element: ElementT | TextElementT, container: HTMLElement) => {
-  nextUnitOfWork = {
+  workInProgressRoot = {
     type: "ROOT",
     dom: container,
     props: {
       children: [element],
     },
   };
+
+  nextUnitOfWork = workInProgressRoot;
 };
 
 let nextUnitOfWork: undefined | FiberT = undefined;
+
+let workInProgressRoot: undefined | FiberT = undefined;
 
 const performUnitOfWork = (fiber: FiberT) => {
   // add dom node
   if (!fiber.dom) {
     fiber.dom = createDom(fiber);
-  }
-
-  if (fiber.parent && fiber.parent.dom) {
-    fiber.parent.dom.appendChild(fiber.dom);
   }
 
   // create new fibers
@@ -100,7 +127,7 @@ const performUnitOfWork = (fiber: FiberT) => {
 
   let prevSibling: undefined | FiberT = undefined;
 
-  while (elements.length < index) {
+  while (elements.length > index) {
     const element = elements[index];
 
     const newFiber = {
@@ -147,6 +174,10 @@ const workLoop = (deadline: IdleDeadline) => {
     nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
 
     shouldYield = deadline.timeRemaining() < 1;
+  }
+
+  if (!nextUnitOfWork && workInProgressRoot) {
+    commitRoot();
   }
 
   requestIdleCallback(workLoop);
