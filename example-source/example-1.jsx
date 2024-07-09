@@ -1,3 +1,5 @@
+import { Didact, DidactDOM } from "../src";
+
 const element = (
   <div>
     <span>some text</span>
