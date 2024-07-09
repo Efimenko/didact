@@ -1,4 +1,19 @@
-const createTextElement = (text) => {
+type ElementT = {
+  type: string;
+  props: Record<string, unknown> & { children: (ElementT | TextElementT)[] };
+};
+
+type TextElementT = {
+  type: "TEXT_ELEMENT";
+  props: {
+    nodeValue: string;
+    children: [];
+  };
+};
+
+const createTextElement = (
+  text: TextElementT["props"]["nodeValue"],
+): TextElementT => {
   return {
     type: "TEXT_ELEMENT",
     props: {
@@ -8,7 +23,11 @@ const createTextElement = (text) => {
   };
 };
 
-const createElement = (type, props, ...children) => {
+const createElement = (
+  type: ElementT["type"],
+  props: ElementT["props"],
+  ...children: (ElementT | string)[]
+) => {
   return {
     type,
     props: {
@@ -20,9 +39,12 @@ const createElement = (type, props, ...children) => {
   };
 };
 
-const checkIsProp = (prop) => prop !== "children";
+const checkIsProp = (prop: string) => prop !== "children";
 
-const render = (element, container) => {
+const render = (
+  element: ElementT | TextElementT,
+  container: HTMLElement | Text,
+) => {
   const dom =
     element.type === "TEXT_ELEMENT"
       ? document.createTextNode("")
@@ -31,6 +53,8 @@ const render = (element, container) => {
   Object.keys(element.props)
     .filter(checkIsProp)
     .forEach((prop) => {
+      // TODO: add type guard for all possible html elements attributes
+      // @ts-ignore
       dom[prop] = element.props[prop];
     });
 
