@@ -25,6 +25,8 @@ type FiberT = {
   parent?: FiberT;
   child?: FiberT;
   sibling?: FiberT;
+  alternate: undefined | FiberT;
+  effectTag?: "UPDATE" | "PLACEMENT" | "DELETION";
 };
 
 const createTextElement = (
@@ -93,7 +95,11 @@ const commitWork = (fiber: undefined | FiberT) => {
 };
 
 const commitRoot = () => {
+  deletions.forEach(commitWork);
+
   commitWork(workInProgressRoot?.child);
+
+  currentRoot = workInProgressRoot;
 
   workInProgressRoot = undefined;
 };
@@ -105,7 +111,10 @@ const render = (element: ElementT | TextElementT, container: HTMLElement) => {
     props: {
       children: [element],
     },
+    alternate: currentRoot,
   };
+
+  deletions = [];
 
   nextUnitOfWork = workInProgressRoot;
 };
@@ -114,43 +123,85 @@ let nextUnitOfWork: undefined | FiberT = undefined;
 
 let workInProgressRoot: undefined | FiberT = undefined;
 
-const performUnitOfWork = (fiber: FiberT) => {
-  // add dom node
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
-  }
+let currentRoot: undefined | FiberT = undefined;
 
-  // create new fibers
-  const elements = fiber.props.children;
+let deletions: FiberT[] = [];
 
+const reconcileChildren = (
+  fiber: FiberT,
+  elements: (ElementT | TextElementT)[],
+) => {
   let index = 0;
+
+  let oldFiber = fiber.alternate && fiber.alternate.child;
 
   let prevSibling: undefined | FiberT = undefined;
 
-  while (elements.length > index) {
+  while (elements.length > index || oldFiber !== undefined) {
     const element = elements[index];
 
-    const newFiber = {
-      type: element.type,
-      props: element.props,
-      dom: undefined,
-      parent: fiber,
-    };
+    let newFiber = undefined;
+
+    const sameType = oldFiber && element && oldFiber.type === element.type;
+
+    if (sameType) {
+      assert(oldFiber, checkNonUndefined);
+
+      newFiber = {
+        type: oldFiber.type,
+        props: element.props,
+        dom: oldFiber.dom,
+        parent: fiber,
+        alternate: oldFiber,
+        effectTag: "UPDATE",
+      } as const;
+    }
+
+    if (element && !sameType) {
+      newFiber = {
+        type: element.type,
+        props: element.props,
+        dom: undefined,
+        parent: fiber,
+        alternate: undefined,
+        effectTag: "PLACEMENT",
+      } as const;
+    }
+
+    if (oldFiber && !sameType) {
+      oldFiber.effectTag = "DELETION";
+
+      deletions.push(oldFiber);
+    }
+
+    if (oldFiber) {
+      oldFiber = oldFiber.sibling;
+    }
 
     if (index === 0) {
       fiber.child = newFiber;
     } else {
-      if (!prevSibling) {
-        throw new Error("prevSibling should exist");
+      if (prevSibling) {
+        prevSibling.sibling = newFiber;
       }
-
-      prevSibling.sibling = newFiber;
     }
 
     prevSibling = newFiber;
 
     index++;
   }
+};
+
+const performUnitOfWork = (fiber: FiberT) => {
+  // add dom node
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  // create new fibers for direct children
+  const elements = fiber.props.children;
+
+  reconcileChildren(fiber, elements);
 
   // return next unit of work
   if (fiber.child) {
