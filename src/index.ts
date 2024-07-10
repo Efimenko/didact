@@ -57,23 +57,84 @@ const createElement = (
   };
 };
 
-const checkIsProp = (prop: string) => prop !== "children";
+const checkIsEventListener = (key: string) => key.startsWith("on");
 
-const createDom = (fiber: ElementT | TextElementT) => {
+const checkIsProperty = (key: string) =>
+  key !== "children" && !checkIsEventListener(key);
+
+const getCheckIsNew =
+  (prev: Record<string, unknown>, next: Record<string, unknown>) =>
+  (key: string) =>
+    prev[key] !== next[key];
+
+const getCheckIsGone = (next: Record<string, unknown>) => (key: string) =>
+  !(key in next);
+
+const setPropToDom = (dom: HTMLElement | Text, key: string, value: unknown) => {
+  // TODO: add type guard for all possible html elements attributes
+  // @ts-ignore
+  dom[key] = value;
+};
+
+const createDom = (fiber: FiberT) => {
   const dom =
     fiber.type === "TEXT_ELEMENT"
       ? document.createTextNode("")
       : document.createElement(fiber.type);
 
-  Object.keys(fiber.props)
-    .filter(checkIsProp)
-    .forEach((prop) => {
-      // TODO: add type guard for all possible html elements attributes
-      // @ts-ignore
-      dom[prop] = fiber.props[prop];
-    });
+  updateDom(dom, {}, fiber.props);
 
   return dom;
+};
+
+const updateDom = (
+  dom: HTMLElement | Text,
+  prevProps: Record<string, unknown>,
+  nextProps: Record<string, unknown>,
+) => {
+  // remove old event listeners
+  Object.keys(prevProps)
+    .filter(checkIsEventListener)
+    .filter(getCheckIsGone(nextProps))
+    .forEach((key) => {
+      assert(dom, checkNonUndefined);
+
+      const eventType = key.toLowerCase().substring(2);
+
+      dom.removeEventListener(eventType, prevProps[key] as EventListener);
+    });
+
+  // remove old properties
+  Object.keys(prevProps)
+    .filter(checkIsProperty)
+    .filter(getCheckIsGone(nextProps))
+    .forEach((key) => {
+      assert(dom, checkNonUndefined);
+
+      setPropToDom(dom, key, "");
+    });
+
+  // add or update properties
+  Object.keys(nextProps)
+    .filter(checkIsProperty)
+    .filter(getCheckIsNew(prevProps, nextProps))
+    .forEach((key) => {
+      assert(dom, checkNonUndefined);
+
+      setPropToDom(dom, key, nextProps[key]);
+    });
+
+  // add new event listeners
+  Object.keys(nextProps)
+    .filter(checkIsEventListener)
+    .filter(getCheckIsNew(prevProps, nextProps))
+    .forEach((key) => {
+      assert(dom, checkNonUndefined);
+
+      const eventType = key.toLowerCase().substring(2);
+
+      dom.addEventListener(eventType, nextProps[key] as EventListener);
+    });
 };
 
 const commitWork = (fiber: undefined | FiberT) => {
@@ -85,9 +146,28 @@ const commitWork = (fiber: undefined | FiberT) => {
 
   assert(fiber.parent.dom, checkNonUndefined);
 
-  assert(fiber.dom, checkNonUndefined);
+  switch (fiber.effectTag) {
+    case "PLACEMENT": {
+      if (fiber.dom !== undefined) {
+        fiber.parent.dom.appendChild(fiber.dom);
+      }
 
-  fiber.parent.dom.appendChild(fiber.dom);
+      break;
+    }
+    case "UPDATE": {
+      if (fiber.dom !== undefined) {
+        assert(fiber.alternate, checkNonUndefined);
+
+        updateDom(fiber.dom, fiber.alternate.props, fiber.props);
+      }
+      break;
+    }
+    case "DELETION": {
+      assert(fiber.dom, checkNonUndefined);
+
+      fiber.parent.dom.removeChild(fiber.dom);
+    }
+  }
 
   commitWork(fiber.child);
 
