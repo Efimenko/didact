@@ -19,14 +19,14 @@ type TextElementT = {
 };
 
 type FiberT = {
-  type: string;
+  type: string | Function;
   props: PropsT;
-  dom: undefined | HTMLElement | Text;
   parent?: FiberT;
   child?: FiberT;
   sibling?: FiberT;
   alternate: undefined | FiberT;
   effectTag?: "UPDATE" | "PLACEMENT" | "DELETION";
+  dom: undefined | HTMLElement | Text;
 };
 
 const createTextElement = (
@@ -76,7 +76,13 @@ const setPropToDom = (dom: HTMLElement | Text, key: string, value: unknown) => {
   dom[key] = value;
 };
 
+const checkIsFunctionComponent = (type: FiberT["type"]): type is Function => {
+  return type instanceof Function;
+};
+
 const createDom = (fiber: FiberT) => {
+  assert(fiber.type, (type) => typeof type === "string");
+
   const dom =
     fiber.type === "TEXT_ELEMENT"
       ? document.createTextNode("")
@@ -144,12 +150,18 @@ const commitWork = (fiber: undefined | FiberT) => {
 
   assert(fiber.parent, checkNonUndefined);
 
-  assert(fiber.parent.dom, checkNonUndefined);
+  let parentFiber = fiber.parent;
+
+  while (!parentFiber.dom) {
+    assert(parentFiber.parent, checkNonUndefined);
+
+    parentFiber = parentFiber.parent;
+  }
 
   switch (fiber.effectTag) {
     case "PLACEMENT": {
       if (fiber.dom !== undefined) {
-        fiber.parent.dom.appendChild(fiber.dom);
+        parentFiber.dom.appendChild(fiber.dom);
       }
 
       break;
@@ -165,13 +177,23 @@ const commitWork = (fiber: undefined | FiberT) => {
     case "DELETION": {
       assert(fiber.dom, checkNonUndefined);
 
-      fiber.parent.dom.removeChild(fiber.dom);
+      commitDeletion(fiber, parentFiber.dom);
     }
   }
 
   commitWork(fiber.child);
 
   commitWork(fiber.sibling);
+};
+
+const commitDeletion = (fiber: FiberT, domParent: HTMLElement | Text) => {
+  if (fiber.dom) {
+    domParent.removeChild(fiber.dom);
+  } else {
+    assert(fiber.child, checkNonUndefined);
+
+    commitDeletion(fiber.child, domParent);
+  }
 };
 
 const commitRoot = () => {
@@ -273,15 +295,11 @@ const reconcileChildren = (
 };
 
 const performUnitOfWork = (fiber: FiberT) => {
-  // add dom node
-  if (!fiber.dom) {
-    fiber.dom = createDom(fiber);
+  if (checkIsFunctionComponent(fiber.type)) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
   }
-
-  // create new fibers for direct children
-  const elements = fiber.props.children;
-
-  reconcileChildren(fiber, elements);
 
   // return next unit of work
   if (fiber.child) {
@@ -296,6 +314,22 @@ const performUnitOfWork = (fiber: FiberT) => {
     }
     nextFiber = nextFiber.parent;
   }
+};
+
+const updateFunctionComponent = (fiber: FiberT) => {
+  assert(fiber.type, checkIsFunctionComponent);
+
+  const children = [fiber.type(fiber.props)];
+
+  reconcileChildren(fiber, children);
+};
+
+const updateHostComponent = (fiber: FiberT) => {
+  if (!fiber.dom) {
+    fiber.dom = createDom(fiber);
+  }
+
+  reconcileChildren(fiber, fiber.props.children);
 };
 
 const workLoop = (deadline: IdleDeadline) => {
